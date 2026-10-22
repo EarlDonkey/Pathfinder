@@ -1,0 +1,8 @@
+{
+  "suppress": [
+    {"id": "abc123def456", "reason": "Reviewed 2026-10-22 — test fixture"},
+    {"plugin": "secrets-basic", "file": "tests/fixtures/*", "reason": "Test fixtures"},
+    {"cve": "CVE-2023-32681", "reason": "Not exploitable in our use case"},
+    {"plugin": "bandit", "title": "B101: assert_used", "file": "tests/*", "reason": "Asserts allowed in tests"}
+  ]
+}

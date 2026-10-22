@@ -7,10 +7,21 @@ name = "vuln-toolkit"
 version = "0.1.0"
 description = "Modular dual-mode vulnerability assessment toolkit"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "PySide6>=6.6.0"  # Added for the Desktop GUI
+]
+
+[project.optional-dependencies]
+sast = ["bandit>=1.7"]
+deps = ["pip-audit>=2.6"]
+all  = ["bandit>=1.7", "pip-audit>=2.6"]
 
 [project.scripts]
 vuln-toolkit = "vuln_toolkit.main:main"
+vuln-toolkit-gui = "vuln_toolkit.gui:main"  # New GUI entry point
 
 [tool.setuptools.packages.find]
 include = ["vuln_toolkit*"]
+
+[tool.setuptools.package-data]
+"vuln_toolkit.data" = ["*.json"]

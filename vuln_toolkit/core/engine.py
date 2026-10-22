@@ -9,13 +9,16 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from vuln_toolkit.core.intel import enrich_findings
 from vuln_toolkit.core.plugin_base import (
     BasePlugin,
     Finding,
     SEVERITY_ORDER,
+    ScanContext,
     TargetType,
     get_registry,
 )
+from vuln_toolkit.core.suppression import apply_suppressions, load_suppressions
 
 log = logging.getLogger(__name__)
 
@@ -29,16 +32,28 @@ class ScanResult:
     findings: list[Finding] = field(default_factory=list)
     errors: list[dict] = field(default_factory=list)
     plugins_run: list[str] = field(default_factory=list)
+    suppressed: int = 0
     duration: float = 0.0
 
     def sorted_findings(self) -> list[Finding]:
-        return sorted(self.findings, key=lambda f: SEVERITY_ORDER[f.severity])
+        return sorted(
+            self.findings,
+            key=lambda f: (SEVERITY_ORDER[f.severity], 1 if f.kev else 0, f.id),
+            reverse=True,
+        )
 
 
 class ScannerOrchestrator:
-    def __init__(self, extra_plugin_dirs: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        extra_plugin_dirs: list[str] | None = None,
+        enrich: bool = True,
+        use_suppressions: bool = True,
+    ) -> None:
         self._extra_dirs = extra_plugin_dirs or []
         self._discovered = False
+        self.enrich = enrich
+        self.use_suppressions = use_suppressions
 
     # ---------- discovery ----------
     def discover(self) -> None:
@@ -56,7 +71,6 @@ class ScannerOrchestrator:
         try:
             pkg = importlib.import_module(pkg_name)
         except ImportError:
-            log.warning("Plugin package not found: %s", pkg_name)
             return
         for info in pkgutil.iter_modules(pkg.__path__):
             if info.name.startswith("_"):
@@ -65,7 +79,6 @@ class ScannerOrchestrator:
 
     def _import_directory(self, directory: Path) -> None:
         if not directory.is_dir():
-            log.warning("Plugin dir does not exist: %s", directory)
             return
         for py in sorted(directory.glob("*.py")):
             if py.name.startswith("_"):
@@ -83,24 +96,25 @@ class ScannerOrchestrator:
     def _import_entry_points(self) -> None:
         try:
             from importlib.metadata import entry_points
-        except ImportError:
-            return
-        try:
             eps = entry_points()
-            group = eps.select(group="vuln_toolkit.plugins") if hasattr(eps, "select") else eps.get("vuln_toolkit.plugins", [])
+            group = (
+                eps.select(group="vuln_toolkit.plugins")
+                if hasattr(eps, "select")
+                else eps.get("vuln_toolkit.plugins", [])
+            )
             for ep in group:
                 try:
                     ep.load()
                 except Exception:
                     log.exception("Entry-point plugin failed: %s", ep)
-        except Exception:
+        except Exception:  # nosec B110 — entry-point discovery is best-effort
             log.debug("Entry-point discovery unavailable", exc_info=True)
 
     def _safe_import(self, module_name: str) -> None:
         try:
             importlib.import_module(module_name)
         except Exception:
-            log.exception("Failed to import plugin module %s", module_name)
+            log.exception("Failed to import %s", module_name)
 
     # ---------- execution ----------
     def run(self, mode: TargetType, target: str) -> ScanResult:
@@ -108,26 +122,48 @@ class ScannerOrchestrator:
         result = ScanResult(target=target, mode=mode.value)
         started = time.perf_counter()
 
-        candidates: list[type[BasePlugin]] = [
-            cls for cls in get_registry().values() if cls().supports(mode)
-        ]
+        context = ScanContext(target=target, mode=mode)
+        candidates = sorted(
+            [cls for cls in get_registry().values() if cls().supports(mode)],
+            key=lambda c: (c.priority, c.name),
+        )
         if not candidates:
             log.warning("No plugins support mode '%s'", mode.value)
 
-        for cls in sorted(candidates, key=lambda c: c.name):
+        for cls in candidates:
             plugin = cls()
             pstart = time.perf_counter()
             try:
-                findings = plugin.run(target)
+                findings = plugin.run(target, context)
                 result.findings.extend(findings)
                 result.plugins_run.append(plugin.name)
-                log.info(
-                    "%-16s %3d finding(s) in %.2fs",
-                    plugin.name, len(findings), time.perf_counter() - pstart,
-                )
+                log.info("%-16s %3d finding(s) in %.2fs",
+                         plugin.name, len(findings), time.perf_counter() - pstart)
             except Exception as exc:
                 log.exception("Plugin '%s' crashed", plugin.name)
                 result.errors.append({"plugin": plugin.name, "error": repr(exc)})
 
+        result.findings = self._dedupe(result.findings)
+
+        if self.use_suppressions:
+            start = Path(target) if mode == TargetType.OFFLINE else Path.cwd()
+            rules = load_suppressions(start)
+            before = len(result.findings)
+            result.findings = apply_suppressions(result.findings, rules)
+            result.suppressed = before - len(result.findings)
+
+        if self.enrich and result.findings:
+            try:
+                enrich_findings(result.findings)
+            except Exception:
+                log.exception("Enrichment failed; continuing with raw findings")
+
         result.duration = time.perf_counter() - started
         return result
+
+    @staticmethod
+    def _dedupe(findings: list[Finding]) -> list[Finding]:
+        seen: dict[str, Finding] = {}
+        for f in findings:
+            seen.setdefault(f.id, f)
+        return list(seen.values())

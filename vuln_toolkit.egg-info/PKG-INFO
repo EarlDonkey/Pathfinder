@@ -3,3 +3,11 @@ Name: vuln-toolkit
 Version: 0.1.0
 Summary: Modular dual-mode vulnerability assessment toolkit
 Requires-Python: >=3.10
+Requires-Dist: PySide6>=6.6.0
+Provides-Extra: sast
+Requires-Dist: bandit>=1.7; extra == "sast"
+Provides-Extra: deps
+Requires-Dist: pip-audit>=2.6; extra == "deps"
+Provides-Extra: all
+Requires-Dist: bandit>=1.7; extra == "all"
+Requires-Dist: pip-audit>=2.6; extra == "all"

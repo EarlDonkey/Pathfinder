@@ -1,2 +1,3 @@
 [console_scripts]
 vuln-toolkit = vuln_toolkit.main:main
+vuln-toolkit-gui = vuln_toolkit.gui:main

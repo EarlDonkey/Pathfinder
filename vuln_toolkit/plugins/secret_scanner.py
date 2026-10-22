@@ -6,7 +6,9 @@ import re
 from collections import Counter
 from pathlib import Path
 
-from vuln_toolkit.core.plugin_base import BasePlugin, Finding, Severity, TargetType, register
+from vuln_toolkit.core.plugin_base import (
+    BasePlugin, Finding, ScanContext, Severity, TargetType, register,
+)
 
 SKIP_DIRS = {".git", ".hg", ".svn", "node_modules", "venv", ".venv", "__pycache__",
              "dist", "build", ".tox", ".mypy_cache", ".pytest_cache", ".idea"}
@@ -33,7 +35,8 @@ PATTERNS = [
      Severity.HIGH, "CWE-798"),
 ]
 
-PLACEHOLDER_HINTS = ("example", "your_", "your-", "changeme", "xxxx", "placeholder", "dummy", "<", "${", "{{")
+PLACEHOLDER_HINTS = ("example", "your_", "your-", "changeme", "xxxx",
+                     "placeholder", "dummy", "<", "${", "{{")
 
 
 def _entropy(value: str) -> float:
@@ -68,8 +71,9 @@ class SecretScanner(BasePlugin):
     name = "secrets-basic"
     description = "Regex + entropy scan for hardcoded credentials"
     target_type = TargetType.OFFLINE
+    priority = 20
 
-    def run(self, target: str) -> list[Finding]:
+    def run(self, target: str, context: ScanContext | None = None) -> list[Finding]:
         root = Path(target).resolve()
         if not root.exists():
             raise FileNotFoundError(f"Path not found: {root}")
@@ -103,7 +107,8 @@ class SecretScanner(BasePlugin):
                         line=lineno,
                         evidence=line.strip()[:160].replace(secret, _redact(secret)),
                         description=f"Possible {label.lower()} committed in source.",
-                        remediation="Move the secret to an environment variable or secrets manager, then rotate it.",
+                        remediation="Move the secret to an environment variable or secrets "
+                                    "manager, then rotate it.",
                         cwe=cwe,
                     ))
         return findings

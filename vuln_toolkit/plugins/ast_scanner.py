@@ -3,22 +3,24 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from vuln_toolkit.core.plugin_base import BasePlugin, Finding, Severity, TargetType, register
+from vuln_toolkit.core.plugin_base import (
+    BasePlugin, Finding, ScanContext, Severity, TargetType, register,
+)
 
 SKIP_DIRS = {"venv", ".venv", "__pycache__", ".git", "build", "dist", "node_modules"}
 
 NAME_RULES = {
-    "eval":    (Severity.HIGH,   "CWE-95",  "Dynamic code evaluation via eval()."),
-    "exec":    (Severity.HIGH,   "CWE-95",  "Dynamic code execution via exec()."),
-    "compile": (Severity.MEDIUM, "CWE-95",  "Dynamic code compilation via compile()."),
-    "__import__": (Severity.MEDIUM, "CWE-94", "Dynamic import via __import__()."),
+    "eval":       (Severity.HIGH,   "CWE-95",  "Dynamic code evaluation via eval()."),
+    "exec":       (Severity.HIGH,   "CWE-95",  "Dynamic code execution via exec()."),
+    "compile":    (Severity.MEDIUM, "CWE-95",  "Dynamic code compilation via compile()."),
+    "__import__": (Severity.MEDIUM, "CWE-94",  "Dynamic import via __import__()."),
 }
 ATTR_RULES = {
-    "os.system":       (Severity.MEDIUM, "CWE-78", "Shell execution via os.system()."),
-    "os.popen":        (Severity.MEDIUM, "CWE-78", "Shell execution via os.popen()."),
-    "pickle.loads":    (Severity.HIGH,   "CWE-502", "Unsafe deserialization via pickle.loads()."),
-    "pickle.load":     (Severity.HIGH,   "CWE-502", "Unsafe deserialization via pickle.load()."),
-    "marshal.loads":   (Severity.HIGH,   "CWE-502", "Unsafe deserialization via marshal.loads()."),
+    "os.system":     (Severity.MEDIUM, "CWE-78",  "Shell execution via os.system()."),
+    "os.popen":      (Severity.MEDIUM, "CWE-78",  "Shell execution via os.popen()."),
+    "pickle.loads":  (Severity.HIGH,   "CWE-502", "Unsafe deserialization via pickle.loads()."),
+    "pickle.load":   (Severity.HIGH,   "CWE-502", "Unsafe deserialization via pickle.load()."),
+    "marshal.loads": (Severity.HIGH,   "CWE-502", "Unsafe deserialization via marshal.loads()."),
 }
 SUBPROCESS_FUNCS = {"run", "Popen", "call", "check_call", "check_output"}
 
@@ -40,12 +42,20 @@ class _Visitor(ast.NodeVisitor):
         self.findings: list[Finding] = []
 
     def _add(self, node: ast.AST, severity: Severity, cwe: str, title: str) -> None:
-        evidence = (ast.get_source_segment(self.source, node) or "").strip().splitlines()[0][:160]
+        segment = ast.get_source_segment(self.source, node) or ""
+        evidence = segment.strip().splitlines()[0][:160] if segment else None
         self.findings.append(Finding(
-            plugin=self.plugin, title=title, severity=severity, target=self.target,
-            category="insecure-code", file=self.relpath, line=getattr(node, "lineno", None),
-            evidence=evidence, cwe=cwe,
-            remediation="Avoid dynamic execution/deserialization on untrusted input; use safe alternatives.",
+            plugin=self.plugin,
+            title=title,
+            severity=severity,
+            target=self.target,
+            category="insecure-code",
+            file=self.relpath,
+            line=getattr(node, "lineno", None),
+            evidence=evidence,
+            cwe=cwe,
+            remediation="Avoid dynamic execution/deserialization on untrusted input; "
+                        "use safe alternatives.",
         ))
 
     def visit_Call(self, node: ast.Call) -> None:
@@ -77,8 +87,9 @@ class AstScanner(BasePlugin):
     name = "ast-dangerous-calls"
     description = "AST scan for eval/exec, shell calls, and unsafe deserialization"
     target_type = TargetType.OFFLINE
+    priority = 20
 
-    def run(self, target: str) -> list[Finding]:
+    def run(self, target: str, context: ScanContext | None = None) -> list[Finding]:
         root = Path(target).resolve()
         if not root.exists():
             raise FileNotFoundError(f"Path not found: {root}")

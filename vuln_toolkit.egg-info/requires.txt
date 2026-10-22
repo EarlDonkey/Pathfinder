@@ -1,0 +1,11 @@
+PySide6>=6.6.0
+
+[all]
+bandit>=1.7
+pip-audit>=2.6
+
+[deps]
+pip-audit>=2.6
+
+[sast]
+bandit>=1.7
