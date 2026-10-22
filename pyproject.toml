@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vuln-toolkit"
+version = "0.1.0"
+description = "Modular dual-mode vulnerability assessment toolkit"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+vuln-toolkit = "vuln_toolkit.main:main"
+
+[tool.setuptools.packages.find]
+include = ["vuln_toolkit*"]
